@@ -15,6 +15,14 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         print('-' * 10)
 
+        state = {
+            'last_epoch': epoch,
+            'state_dict': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict()
+        }
+        torch.save(state, 'model_next' + str(epoch+1) + '.pt')
+
         # Each epoch has a training and validation phase
         for phase in ['train', 'val']:
             if phase == 'train':
@@ -51,7 +59,6 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
                         loss = loss1 + 0.4*loss2
                     else:
                         outputs = normalize(model(inputs))
-                        print('hey')
                         loss = criterion(outputs, labels)
 
                     _, preds = torch.max(outputs, 1)
@@ -65,8 +72,6 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
                 running_loss += loss.item() * inputs.size(0)
                 running_corrects += torch.sum(preds == labels.data)
                 
-            if phase == 'train':
-                scheduler.step()
 
             epoch_loss = running_loss / len(dataloaders[phase].dataset)
             epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
@@ -79,6 +84,17 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
                 best_model_wts = copy.deepcopy(model.state_dict())
             if phase == 'val':
                 val_acc_history.append(epoch_acc)
+
+        scheduler.step()
+        if epoch>18 and (epoch+1)%5==0:
+            #save
+            state = {
+                'last_epoch': epoch,
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'scheduler': scheduler.state_dict()
+            }
+            torch.save(state, 'model_next' + str(epoch+1) + '.pt')
 
         print()
 
@@ -93,6 +109,7 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
 def get_target():
     return torch.tensor([1,1,0,0,0,0,0,0,0,0], dtype=torch.float32)
 
+#onehot
 def twohot_decode(X):
     return torch.argmax(torch.narrow(X, 0, 2, 8))
 
@@ -133,19 +150,17 @@ def freeze_BatchNorm2d(model):
     return
 
 
-#ulozit nejako takto
+#load
 '''
-state = {
-    'epoch': epoch,
-    'state_dict': model.state_dict(),
-    'optimizer': optimizer.state_dict(),
-    ...
-}
-torch.save(state, filepath.pt!!!)
-
-state = torch.load(filepath)
+state = torch.load('model_nextXX.pt')
 model.load_state_dict(state['state_dict'])
 optimizer.load_state_dict(state['optimizer'])
+scheduler.load_state_dict(state['scheduler'])
+next_epoch = state['last_epoch']+1
 '''
+
+
+
+
 
 
