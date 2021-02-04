@@ -52,28 +52,7 @@ partition = {'train': [str(x*10+y) for x in range(100) for y in range(6)],
              'val': [str(x*10+y) for x in range(1000) for y in range(6,8)],
              'test': [str(x*10+y) for x in range(1000) for y in range(8,10)]}
 
-'''
-#input shape b*16*224*224, 16 images with a size of 224*224
-b = x.shape[0]   #b is batch size
 
-#images of the choices
-choices = x[:, 8:].unsqueeze(dim=2) #[b, 8, 1, h, w]
-print()
-#images of the rows
-row1 = x[:, 0:3].unsqueeze(1) #[b, 1, 3, h, w]
-row2 = x[:, 3:6].unsqueeze(1) #[b, 1, 3, h, w]
-
-row3_p = x[:, 6:8].unsqueeze(dim=1).repeat(1, 8, 1, 1, 1) #[b, 8, 2, h, w]
-row3 = torch.cat((row3_p, choices), dim=2) #[b, 8, 3, h, w]
-
-rows = torch.cat((row1, row2, row3), dim=1) #[b, 10, 3, h, w]
-
-#x = rows.view(b*10, 3, 224, 224) #reshape the input for training, use same the weights for 10 rows
-#print(x)
-#x = feature(x)
-#x = fc(x) #fully connected layer, output dimension is 1
-#x = x.view(b, 10) #output size is b*10
-'''
 train_set = Dataset(partition['train'],'train')
 val_set = Dataset(partition['val'],'val')
 data_loader = {'train': torch.utils.data.DataLoader(train_set,batch_size=4,shuffle=True), 'val': torch.utils.data.DataLoader(val_set,batch_size=32,shuffle=True)}
@@ -81,9 +60,12 @@ data_loader = {'train': torch.utils.data.DataLoader(train_set,batch_size=4,shuff
 #train
 device = torch.device('cuda')
 model, loss, optimizer, scheduler = get_nn(device)
-best_model, val_acc_history = train_model(device,model,data_loader,loss,optimizer,scheduler,20,is_inception=False)
+epochs = 35
+best_model, val_acc_history = train_model(device,model,data_loader,loss,optimizer,scheduler,epochs,is_inception=False)
 
+torch.save(best_model.state_dict(), 'model_finish' + str(epochs) + '.pt')
 
+print(val_acc_history)
 
 
 
