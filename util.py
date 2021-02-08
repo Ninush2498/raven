@@ -15,14 +15,6 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         print('-' * 10)
 
-        state = {
-            'last_epoch': epoch,
-            'state_dict': model.state_dict(),
-            'optimizer': optimizer.state_dict(),
-            'scheduler': scheduler.state_dict()
-        }
-        torch.save(state, 'model_next' + str(epoch+1) + '.pt')
-
         # Each epoch has a training and validation phase
         for phase in ['train', 'val']:
             if phase == 'train':
@@ -32,17 +24,19 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
 
             running_loss = 0.0
             running_corrects = 0
+            i = 0 #acc
+            optimizer.zero_grad() #acc
 
             # Iterate over data.
             for inputs, labels in dataloaders[phase]:
-                torch.cuda.empty_cache()
+                #torch.cuda.empty_cache()
                 inputs = inputs.view(inputs.shape[0]*10, 3, 224, 224) #batch
                 labels = labels.view(labels.shape[0]*10,1) #batch
                 inputs = inputs.to(device)
                 labels = labels.to(device)
 
                 # zero the parameter gradients
-                optimizer.zero_grad()
+                #optimizer.zero_grad()
 
                 # forward
                 # track history if only in train
@@ -59,14 +53,19 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
                         loss = loss1 + 0.4*loss2
                     else:
                         outputs = normalize(model(inputs))
-                        loss = criterion(outputs, labels)
+                        loss = criterion(outputs, labels)                        
 
                     _, preds = torch.max(outputs, 1)
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
                         loss.backward()
-                        optimizer.step()
+                        if (i+1) % 8 == 0: #accumulate
+                            optimizer.step()
+                            optimizer.zero_grad()
+                        i += 1
+
+                        #optimizer.step()
 
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
@@ -158,6 +157,9 @@ optimizer.load_state_dict(state['optimizer'])
 scheduler.load_state_dict(state['scheduler'])
 next_epoch = state['last_epoch']+1
 '''
+
+
+
 
 
 
