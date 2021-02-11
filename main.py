@@ -48,8 +48,8 @@ class Dataset(torch.utils.data.Dataset):
 
 
 
-partition = {'train': [str(x*10+y) for x in range(100) for y in range(6)],
-             'val': [str(x*10+y) for x in range(1000) for y in range(6,8)],
+partition = {'train': [str(x*10+y) for x in range(10) for y in range(6)],
+             'val': [str(x*10+y) for x in range(10) for y in range(6,8)],
              'test': [str(x*10+y) for x in range(1000) for y in range(8,10)]}
 
 
@@ -58,10 +58,11 @@ val_set = Dataset(partition['val'],'val')
 data_loader = {'train': torch.utils.data.DataLoader(train_set,batch_size=4,shuffle=True), 'val': torch.utils.data.DataLoader(val_set,batch_size=32,shuffle=True)}
 
 #train
-device = torch.device('cuda')
-model, loss, optimizer, scheduler = get_nn(device)
+model, loss, optimizer, scheduler = get_nn(True)
 epochs = 35
-best_model, val_acc_history = train_model(device,model,data_loader,loss,optimizer,scheduler,epochs,is_inception=False)
+print('Training:')
+device = torch.device('cuda')
+best_model, val_acc_history = train_model(device,model,data_loader,loss,optimizer,scheduler,epochs)
 
 torch.save(best_model.state_dict(), 'model_finish' + str(epochs) + '.pt')
 
