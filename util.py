@@ -3,7 +3,7 @@ import torchvision
 import time
 import copy
 
-def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num_epochs=25, is_inception=False):
+def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num_epochs=25):
     since = time.time()
     val_acc_history = []
     model.to(device)
@@ -20,16 +20,18 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
             if phase == 'train':
                 model.train()  # Set model to training mode
             else:
+                optimizer.step() #last incomplete batch
+                optimizer.zero_grad() #acc
+                scheduler.step()
                 model.eval()   # Set model to evaluate mode
 
             running_loss = 0.0
             running_corrects = 0
             i = 0 #acc
-            optimizer.zero_grad() #acc
-
+            
             # Iterate over data.
             for inputs, labels in dataloaders[phase]:
-                #torch.cuda.empty_cache()
+                torch.cuda.empty_cache()
                 inputs = inputs.view(inputs.shape[0]*10, 3, 224, 224) #batch
                 labels = labels.view(labels.shape[0]*10,1) #batch
                 inputs = inputs.to(device)
@@ -42,20 +44,10 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
                     # Get model outputs and calculate loss
-                    # Special case for inception because in training it has an auxiliary output. In train
-                    #   mode we calculate the loss by summing the final output and the auxiliary output
-                    #   but in testing we only consider the final output.
-                    if is_inception and phase == 'train':
-                        # From https://discuss.pytorch.org/t/how-to-optimize-inception-model-with-auxiliary-classifiers/7958
-                        outputs, aux_outputs = model(inputs)
-                        loss1 = criterion(outputs, labels)
-                        loss2 = criterion(aux_outputs, labels)
-                        loss = loss1 + 0.4*loss2
-                    else:
-                        outputs = normalize(model(inputs))
-                        loss = criterion(outputs, labels)                        
+                    outputs = normalize(model(inputs))
+                    loss = criterion(outputs, labels)
 
-                    _, preds = torch.max(outputs, 1)
+                    preds = torch.round(outputs)
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
@@ -63,28 +55,27 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
                         if (i+1) % 8 == 0: #accumulate
                             optimizer.step()
                             optimizer.zero_grad()
+                            scheduler.step()
                         i += 1
 
                         #optimizer.step()
 
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels.data)
-                
+                running_corrects += torch.sum(preds.data == labels.data)
 
-            epoch_loss = running_loss / len(dataloaders[phase].dataset)
-            epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
+            epoch_loss = running_loss / (len(dataloaders[phase].dataset)*10)
+            epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset) * 10
 
-            print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
-
+            print('{} Loss: {:.4f} Acc: {:.4f}%'.format(phase, epoch_loss, epoch_acc))
+            
             # deep copy the model
             if phase == 'val' and epoch_acc > best_acc:
                 best_acc = epoch_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
             if phase == 'val':
                 val_acc_history.append(epoch_acc)
-
-        scheduler.step()
+            
         if epoch>18 and (epoch+1)%5==0:
             #save
             state = {
