@@ -2,6 +2,7 @@ import numpy as np
 import torchvision
 import torch
 from network import *
+from util import *
 
 class Dataset(torch.utils.data.Dataset):
     
@@ -40,34 +41,37 @@ class Dataset(torch.utils.data.Dataset):
         row3 = torch.cat((row3_p, choices), dim=2) #[b, 8, 3, h, w]
 
         rows = torch.cat((row1, row2, row3), dim=1).squeeze(dim=0) #[b, 10, 3, h, w]
-
-        #y = data['target']
+        
+        ans = data['target']
         y = get_target()
 
-        return rows, y
+        return rows, y, ans
 
 
 
-partition = {'train': [str(x*10+y) for x in range(10) for y in range(6)],
-             'val': [str(x*10+y) for x in range(10) for y in range(6,8)],
+partition = {'train': [str(x*10+y) for x in range(100) for y in range(6)],
+             'val': [str(x*10+y) for x in range(100) for y in range(6,8)],
              'test': [str(x*10+y) for x in range(1000) for y in range(8,10)]}
 
 
 train_set = Dataset(partition['train'],'train')
 val_set = Dataset(partition['val'],'val')
-data_loader = {'train': torch.utils.data.DataLoader(train_set,batch_size=4,shuffle=True), 'val': torch.utils.data.DataLoader(val_set,batch_size=32,shuffle=True)}
+test_set = Dataset(partition['test'],'test')
+
+data_loader = {'train': torch.utils.data.DataLoader(train_set,batch_size=4,shuffle=True),
+               'val': torch.utils.data.DataLoader(val_set,batch_size=16,shuffle=False),
+               'test': torch.utils.data.DataLoader(test_set,batch_size=16,shuffle=False)}
 
 #train
 model, loss, optimizer, scheduler = get_nn(True)
-epochs = 35
+epochs = 12
 print('Training:')
 device = torch.device('cuda')
-best_model, val_acc_history = train_model(device,model,data_loader,loss,optimizer,scheduler,epochs)
 
-torch.save(best_model.state_dict(), 'model_finish' + str(epochs) + '.pt')
+best_model, val_acc_history = train_model(device,model,data_loader,loss,optimizer,scheduler,epochs)
+torch.save(best_model.state_dict(), 'center_single_best.pt')
 
 print(val_acc_history)
 
-
-
+#test_model(device, model, data_loader)
 
