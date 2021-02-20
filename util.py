@@ -26,16 +26,19 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
                 model.eval()   # Set model to evaluate mode
 
             running_loss = 0.0
-            running_corrects = 0
+            running_corrects1 = 0
+            running_corrects0 = 0
+            corrects = 0
             i = 0 #acc
             
             # Iterate over data.
-            for inputs, labels in dataloaders[phase]:
+            for inputs, labels, answers in dataloaders[phase]:
                 torch.cuda.empty_cache()
                 inputs = inputs.view(inputs.shape[0]*10, 3, 224, 224) #batch
                 labels = labels.view(labels.shape[0]*10,1) #batch
                 inputs = inputs.to(device)
                 labels = labels.to(device)
+                answers = answers.to(device)
 
                 # zero the parameter gradients
                 #optimizer.zero_grad()
@@ -47,7 +50,7 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
                     outputs = normalize(model(inputs))
                     loss = criterion(outputs, labels)
 
-                    preds = torch.round(outputs)
+                    preds = torch.round(outputs).view(int(list(outputs.shape)[0]/10),10)
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
@@ -55,36 +58,34 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
                         if (i+1) % 8 == 0: #accumulate
                             optimizer.step()
                             optimizer.zero_grad()
-                            scheduler.step()
                         i += 1
 
                         #optimizer.step()
 
                 # statistics
-                running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds.data == labels.data)
+                running_loss += loss.item()
+                running_corrects1 += torch.sum(preds[:,:2].data == labels.view(int(list(labels.shape)[0]/10),10)[:,:2].data)
+                running_corrects0 += torch.sum(preds[:,2:].data == labels.view(int(list(labels.shape)[0]/10),10)[:,2:].data)
+                corrects += torch.sum(answers.data == twohot_decode(outputs.view(int(list(outputs.shape)[0]/10),10)))
 
             epoch_loss = running_loss / (len(dataloaders[phase].dataset)*10)
-            epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset) * 10
+            epoch_acc1 = running_corrects1.double() / (len(dataloaders[phase].dataset)*2) * 100
+            epoch_acc0 = running_corrects0.double() / (len(dataloaders[phase].dataset)*8) * 100
+            real_acc = corrects.double() / len(dataloaders[phase].dataset) * 100
 
-            print('{} Loss: {:.4f} Acc: {:.4f}%'.format(phase, epoch_loss, epoch_acc))
+            print('{} Loss: {:.4f} Acc1: {:.4f}% Acc0: {:.4f}%'.format(phase, epoch_loss, epoch_acc1, epoch_acc0))
+            print('Real Acc: {:.4f}%'.format(real_acc))
             
             # deep copy the model
-            if phase == 'val' and epoch_acc > best_acc:
-                best_acc = epoch_acc
+            if phase == 'val' and real_acc > best_acc:
+                best_acc = real_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
             if phase == 'val':
-                val_acc_history.append(epoch_acc)
+                val_acc_history.append(real_acc)
             
-        if epoch>18 and (epoch+1)%5==0:
+        if (epoch+1)%5==0:
             #save
-            state = {
-                'last_epoch': epoch,
-                'state_dict': model.state_dict(),
-                'optimizer': optimizer.state_dict(),
-                'scheduler': scheduler.state_dict()
-            }
-            torch.save(state, 'model_next' + str(epoch+1) + '.pt')
+            torch.save(best_model_wts, 'center_single_after' + str(epoch) + '.pt')
 
         print()
 
@@ -101,7 +102,7 @@ def get_target():
 
 #onehot
 def twohot_decode(X):
-    return torch.argmax(torch.narrow(X, 0, 2, 8))
+    return torch.argmax(torch.narrow(X, 1, 2, 8), dim=1)
 
 def normalize(X):
     return torch.sigmoid(X)
@@ -139,6 +140,49 @@ def freeze_BatchNorm2d(model):
                     param.requires_grad = True
     return
 
+def test_model(device, model, dataloaders):
+    since = time.time()
+
+    #load
+    state = torch.load('centre_single_after4.pt')
+    model.load_state_dict(state['state_dict'])
+    model.to(device)
+
+    print('Testing...')
+    print('-' * 10)
+
+    # Each epoch has a training and validation phase
+    phase = 'test'
+    model.eval()   # Set model to evaluate mode
+    corrects = 0
+    
+    # Iterate over data.
+    for inputs, labels, answers in dataloaders[phase]:
+        torch.cuda.empty_cache()
+        inputs = inputs.view(inputs.shape[0]*10, 3, 224, 224) #batch
+        inputs = inputs.to(device)
+        answers = answers.to(device)
+
+        # forward
+        # track history if only in train
+        with torch.set_grad_enabled(phase == 'train'):
+            # Get model outputs and calculate loss
+            outputs = normalize(model(inputs))
+
+            preds = twohot_decode(outputs.view(int(list(outputs.shape)[0]/10),10))
+
+        # statistics
+        corrects += torch.sum(answers.data == preds.data)
+
+    real_acc = corrects.double() / len(dataloaders[phase].dataset) * 100
+    print('Acc: {:.4f}%'.format(real_acc))
+
+    print()
+
+    time_elapsed = time.time() - since
+    print('Test complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
+
+    return
 
 #load
 '''
