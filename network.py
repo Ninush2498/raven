@@ -13,7 +13,7 @@ def get_nn(device=torch.device('cuda'), pretrained=False):
     freeze_BatchNorm2d(model)
     model.to(device)
 
-    loss = nn.BCELoss('sum')
+    loss = nn.BCELoss(reduction='sum')
 
     optimizer = optim.Adam(model.parameters(), lr=0.0002)
     change_rate = lambda epoch : 0.5 if epoch%10==0 else 1
