@@ -6,7 +6,6 @@ import copy
 def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num_epochs=25):
     since = time.time()
     val_acc_history = []
-    model.to(device)
 
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
@@ -20,28 +19,24 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
             if phase == 'train':
                 model.train()  # Set model to training mode
             else:
-                optimizer.step() #last incomplete batch
-                optimizer.zero_grad() #acc
                 scheduler.step()
                 model.eval()   # Set model to evaluate mode
 
             running_loss = 0.0
-            running_corrects1 = 0
-            running_corrects0 = 0
+            #running_corrects = 0
             corrects = 0
-            i = 0 #acc
             
             # Iterate over data.
             for inputs, labels, answers in dataloaders[phase]:
-                torch.cuda.empty_cache()
-                inputs = inputs.view(inputs.shape[0]*10, 3, 224, 224) #batch
-                labels = labels.view(labels.shape[0]*10,1) #batch
+                batch = inputs.shape[0]
+                inputs = inputs.view(batch*10, 3, 224, 224)                  
+                labels = labels.view(batch*10,1)
                 inputs = inputs.to(device)
                 labels = labels.to(device)
                 answers = answers.to(device)
 
                 # zero the parameter gradients
-                #optimizer.zero_grad()
+                optimizer.zero_grad()
 
                 # forward
                 # track history if only in train
@@ -49,31 +44,27 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
                     # Get model outputs and calculate loss
                     outputs = normalize(model(inputs))
                     loss = criterion(outputs, labels)
-
-                    preds = torch.round(outputs).view(int(list(outputs.shape)[0]/10),10)
+                    
+                    outputs = outputs.view(batch,10)
+                    preds = torch.round(outputs)
+                    labels = labels.view(batch,10)
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
                         loss.backward()
-                        if (i+1) % 8 == 0: #accumulate
-                            optimizer.step()
-                            optimizer.zero_grad()
-                        i += 1
+                        optimizer.step()
 
-                        #optimizer.step()
 
                 # statistics
                 running_loss += loss.item()
-                running_corrects1 += torch.sum(preds[:,:2].data == labels.view(int(list(labels.shape)[0]/10),10)[:,:2].data)
-                running_corrects0 += torch.sum(preds[:,2:].data == labels.view(int(list(labels.shape)[0]/10),10)[:,2:].data)
-                corrects += torch.sum(answers.data == twohot_decode(outputs.view(int(list(outputs.shape)[0]/10),10)))
-
+                running_corrects += torch.sum(preds.data==labels.data)
+                corrects += torch.sum(answers.data==twohot_decode(outputs))
+                
             epoch_loss = running_loss / (len(dataloaders[phase].dataset)*10)
-            epoch_acc1 = running_corrects1.double() / (len(dataloaders[phase].dataset)*2) * 100
-            epoch_acc0 = running_corrects0.double() / (len(dataloaders[phase].dataset)*8) * 100
+            epoch_acc = running_corrects.double() / (len(dataloaders[phase].dataset)*10) * 100
             real_acc = corrects.double() / len(dataloaders[phase].dataset) * 100
 
-            print('{} Loss: {:.4f} Acc1: {:.4f}% Acc0: {:.4f}%'.format(phase, epoch_loss, epoch_acc1, epoch_acc0))
+            print('{} Loss: {:.4f} Acc: {:.4f}%'.format(phase, epoch_loss, epoch_acc))
             print('Real Acc: {:.4f}%'.format(real_acc))
             
             # deep copy the model
@@ -81,11 +72,7 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
                 best_acc = real_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
             if phase == 'val':
-                val_acc_history.append(real_acc)
-            
-        if (epoch+1)%5==0:
-            #save
-            torch.save(best_model_wts, 'center_single_after' + str(epoch) + '.pt')
+                val_acc_history.append(real_acc.item())
 
         print()
 
@@ -120,32 +107,14 @@ def freeze_BatchNorm2d(model):
                             if isinstance(minichild, torch.nn.BatchNorm2d):
                                 for param in minichild.parameters():
                                     param.requires_grad = False
-                            else:
-                                if isinstance(minichild, torch.nn.Sequential):
-                                    for seqmininame, seqminichild in (minichild.named_children()):
-                                        if isinstance(seqminichild, torch.nn.BatchNorm2d):
-                                            for param in seqminichild.parameters():
-                                                param.requires_grad = False
-                                        else:
-                                            for param in seqminichild.parameters():
-                                                param.requires_grad = True
-                                else:
-                                    for param in minichild.parameters():
-                                        param.requires_grad = True
-                    else:
-                        for param in seqchild.parameters():
-                            param.requires_grad = True
-            else:
-                for param in child.parameters():
-                    param.requires_grad = True
     return
 
 def test_model(device, model, dataloaders):
     since = time.time()
 
     #load
-    state = torch.load('centre_single_after4.pt')
-    model.load_state_dict(state['state_dict'])
+    state = torch.load('LR_single_best.pt', device)
+    model.load_state_dict(state)
     model.to(device)
 
     print('Testing...')
@@ -158,8 +127,8 @@ def test_model(device, model, dataloaders):
     
     # Iterate over data.
     for inputs, labels, answers in dataloaders[phase]:
-        torch.cuda.empty_cache()
-        inputs = inputs.view(inputs.shape[0]*10, 3, 224, 224) #batch
+        batch = inputs.shape[0]
+        inputs = inputs.view(batch*10, 3, 224, 224)
         inputs = inputs.to(device)
         answers = answers.to(device)
 
@@ -169,10 +138,11 @@ def test_model(device, model, dataloaders):
             # Get model outputs and calculate loss
             outputs = normalize(model(inputs))
 
-            preds = twohot_decode(outputs.view(int(list(outputs.shape)[0]/10),10))
-
+            preds = twohot_decode(outputs.view(batch,10))
+            
+            
         # statistics
-        corrects += torch.sum(answers.data == preds.data)
+        corrects += torch.sum(preds.data==answers.data)
 
     real_acc = corrects.double() / len(dataloaders[phase].dataset) * 100
     print('Acc: {:.4f}%'.format(real_acc))
@@ -186,18 +156,10 @@ def test_model(device, model, dataloaders):
 
 #load
 '''
-state = torch.load('model_nextXX.pt')
-model.load_state_dict(state['state_dict'])
-optimizer.load_state_dict(state['optimizer'])
-scheduler.load_state_dict(state['scheduler'])
-next_epoch = state['last_epoch']+1
+import matplotlib.pyplot as plt
+plt.plot(train_losses, label='Training loss') #train_losses.append(loss)
+plt.plot(test_losses, label='Validation loss')
+plt.legend(frameon=False)
+plt.show()
 '''
-
-
-
-
-
-
-
-
 
