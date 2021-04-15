@@ -23,7 +23,7 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
                 model.eval()   # Set model to evaluate mode
 
             running_loss = 0.0
-            #running_corrects = 0
+            running_corrects = 0
             corrects = 0
             
             # Iterate over data.
@@ -162,4 +162,5 @@ plt.plot(test_losses, label='Validation loss')
 plt.legend(frameon=False)
 plt.show()
 '''
+
 
