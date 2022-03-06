@@ -19,10 +19,10 @@ class Dataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         'Generates one sample of data'
-        # Select sample
+        #select sample
         ID = self.list_IDs[index]
 
-        # Load data and get label
+        #load data and get label
         if ID[0]=="UD":
             data = np.load('RAVEN-10000/up_center_single_down_center_single/RAVEN_' + ID[1] + '_' + self.phase + '.npz')
         elif ID[0]=="LR":
@@ -40,25 +40,15 @@ class Dataset(torch.utils.data.Dataset):
         X = torch.ones(size=(16, 224, 224))
         for i in range(16):
             X[i] = self.p(data['image'][i])
-        X = X.unsqueeze(dim=0)
         
-        ans = data['target']
-        y = get_target()
-
-        #images of the choices
-        choices = X[:, 8:].unsqueeze(dim=2) #[b, 8, 1, h, w]
-
-        #images of the rows
-        row1 = X[:, 0:3].unsqueeze(1) #[b, 1, 3, h, w]
-        row2 = X[:, 3:6].unsqueeze(1) #[b, 1, 3, h, w]
-
-        row3_p = X[:, 6:8].unsqueeze(dim=1).repeat(1, 8, 1, 1, 1) #[b, 8, 2, h, w]
-        row3 = torch.cat((row3_p, choices), dim=2) #[b, 8, 3, h, w]
-
-        rows = torch.cat((row1, row2, row3), dim=1).squeeze(dim=0) #[b, 10, 3, h, w]
+        ans = data['target'] #get answer
+        y = torch.zeros(8)
+        y[ans] = 1
         
-
-        return rows, y, ans
+        if self.phase=='test':
+            return X, y, ID[0]
+        else:
+            return X, ans
 
 dataset = []
 dataset.append('C')
@@ -68,29 +58,36 @@ dataset.append('LR')
 dataset.append('UD')
 dataset.append('inC')
 dataset.append('in2x2')
-partition = {'train': [(dataset[i],str(x*10+y)) for i in range(7) for x in range(1000) for y in range(6)], # + [(dataset2,str(x*10+y)) for x in range(1000) for y in range(6)] + [(dataset3,str(x*10+y)) for x in range(1000) for y in range(6)],
-             'val': [(dataset[i],str(x*10+y)) for i in range(7) for x in range(1000) for y in range(6,8)], # + [(dataset2,str(x*10+y)) for x in range(1000) for y in range(6,8)] + [(dataset3,str(x*10+y)) for x in range(1000) for y in range(6,8)],
-             'test': [(dataset[i],str(x*10+y)) for i in [1,6] for x in range(1000) for y in range(8,10)]} # + [(dataset2,str(x*10+y)) for x in range(1000) for y in range(8,10)]} # + [(dataset3,str(x*10+y)) for x in range(1000) for y in range(8,10)]}
+partition = {'train': [(dataset[i],str(x*10+y)) for i in range(7) for x in range(1000) for y in range(6)],
+             'val': [(dataset[i],str(x*10+y)) for i in range(7) for x in range(1000) for y in range(6,8)],
+             'test': [(dataset[i],str(x*10+y)) for i in range(7) for x in range(1000) for y in range(8,10)]}
 
 
 train_set = Dataset(partition['train'],'train')
 val_set = Dataset(partition['val'],'val')
 test_set = Dataset(partition['test'],'test')
+test_batch = 32 #for visualization
 
+#data loader that automatically loads the data in batches
 data_loader = {'train': torch.utils.data.DataLoader(train_set,batch_size=32,shuffle=True),
                'val': torch.utils.data.DataLoader(val_set,batch_size=32,shuffle=False),
-               'test': torch.utils.data.DataLoader(test_set,batch_size=16,shuffle=False)}
+               'test': torch.utils.data.DataLoader(test_set,batch_size=test_batch,shuffle=False)}
+
 
 #train
 epochs = 30
 print('Training:')
-device = torch.device('cuda')
+device = torch.device('cuda') #GPU
 model, loss, optimizer, scheduler = get_nn(device,True)
 
 best_model, val_acc_history = train_model(device,model,data_loader,loss,optimizer,scheduler,epochs)
-torch.save(best_model.state_dict(), 'all_unsup.pt')
+#save the model for future testing
+#choose according to training style
+#torch.save(best_model.state_dict(), (dataset1 + '_best.pt'))
+#torch.save(best_model.state_dict(), (dataset1 + '+' + dataset2 + '_best.pt'))
+#torch.save(best_model.state_dict(), (dataset1 + '+' + dataset2 + '+' + dataset3 + '_best.pt'))
+torch.save(best_model.state_dict(), 'all_best.pt')
 
 print(val_acc_history)
 
-#test_model(device, model, data_loader)
-
+test_model(device, model, data_loader, False, test_batch)
