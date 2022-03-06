@@ -2,11 +2,13 @@ import torch
 import torchvision
 import time
 import copy
+import network as n
 
 def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num_epochs=25):
     since = time.time()
     val_acc_history = []
-
+    
+    #make a copy of the model to keep track of the best performing model
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
 
@@ -14,60 +16,52 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         print('-' * 10)
 
-        # Each epoch has a training and validation phase
+        #training and validation phase in each epoch
         for phase in ['train', 'val']:
             if phase == 'train':
-                model.train()  # Set model to training mode
+                model.train()  #set model to training mode
             else:
                 scheduler.step()
-                model.eval()   # Set model to evaluate mode
+                model.eval()   #set model to evaluation mode
 
             running_loss = 0.0
-            running_corrects = 0
             corrects = 0
             
-            # Iterate over data.
-            for inputs, labels, answers in dataloaders[phase]:
-                batch = inputs.shape[0]
-                inputs = inputs.view(batch*10, 3, 224, 224)                  
-                labels = labels.view(batch*10,1)
+            #iterate over data
+            for inputs, labels in dataloaders[phase]:
+                #GPU computations
                 inputs = inputs.to(device)
                 labels = labels.to(device)
-                answers = answers.to(device)
 
-                # zero the parameter gradients
+                #zero the parameter gradients
                 optimizer.zero_grad()
 
-                # forward
-                # track history if only in train
+                #forward pass
+                #track history only in training phase
                 with torch.set_grad_enabled(phase == 'train'):
-                    # Get model outputs and calculate loss
-                    outputs = normalize(model(inputs))
+                    #get model outputs and calculate loss
+                    outputs = model(inputs)
                     loss = criterion(outputs, labels)
-                    
-                    outputs = outputs.view(batch,10)
-                    preds = torch.round(outputs)
-                    labels = labels.view(batch,10)
 
-                    # backward + optimize only if in training phase
+                    preds = torch.argmax(outputs, dim=1)
+
+                    #backward + optimize only in training phase
                     if phase == 'train':
                         loss.backward()
                         optimizer.step()
 
 
-                # statistics
-                running_loss += loss.item()
-                running_corrects += torch.sum(preds.data==labels.data)
-                corrects += torch.sum(answers.data==twohot_decode(outputs))
-                
-            epoch_loss = running_loss / (len(dataloaders[phase].dataset)*10)
-            epoch_acc = running_corrects.double() / (len(dataloaders[phase].dataset)*10) * 100
-            real_acc = corrects.double() / len(dataloaders[phase].dataset) * 100
+                #statistics
+                running_loss += loss.item()*inputs.size(0)
+                corrects += torch.sum(preds==labels)
+            
+            epoch_loss = running_loss / (len(dataloaders[phase].dataset))
+            real_acc = corrects.double() / (len(dataloaders[phase].dataset)) * 100
 
-            print('{} Loss: {:.4f} Acc: {:.4f}%'.format(phase, epoch_loss, epoch_acc))
+            print('{} Loss: {:.4f}'.format(phase, epoch_loss))
             print('Real Acc: {:.4f}%'.format(real_acc))
             
-            # deep copy the model
+            #deep copy the model if better
             if phase == 'val' and real_acc > best_acc:
                 best_acc = real_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
@@ -76,24 +70,15 @@ def train_model(device, model, dataloaders, criterion, optimizer, scheduler, num
 
         print()
 
-    time_elapsed = time.time() - since
+    time_elapsed = time.time() - since #track the training time
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
     print('Best val Acc: {:4f}'.format(best_acc))
 
-    # load best model weights
+    #load best model weights and return the best model
     model.load_state_dict(best_model_wts)
     return model, val_acc_history
 
-def get_target():
-    return torch.tensor([1,1,0,0,0,0,0,0,0,0], dtype=torch.float32)
-
-#onehot
-def twohot_decode(X):
-    return torch.argmax(torch.narrow(X, 1, 2, 8), dim=1)
-
-def normalize(X):
-    return torch.sigmoid(X)
-
+#freeze batch normalization layers of ResNet-18
 def freeze_BatchNorm2d(model):
     for name, child in (model.named_children()):
         if isinstance(child, torch.nn.BatchNorm2d):
@@ -109,58 +94,58 @@ def freeze_BatchNorm2d(model):
                                     param.requires_grad = False
     return
 
-def test_model(device, model, dataloaders):
+def test_model(device, model, dataloaders, visualize=False, batch_size=1):
     since = time.time()
 
-    #load
-    state = torch.load('LR_single_best.pt', device)
+    #load model (not necessary when testing directly after training)
+    state = torch.load('all_best.pt', device)
     model.load_state_dict(state)
+    
+    if visualize: #add data collecting layer
+        model.fc.add_module('output', model.fc[2])
+        model.fc[2] = n.Activations(len(dataloaders['test'].dataset), batch_size)
     model.to(device)
 
     print('Testing...')
     print('-' * 10)
 
-    # Each epoch has a training and validation phase
+    #only testing phase
     phase = 'test'
-    model.eval()   # Set model to evaluate mode
+    model.eval()   #set model to evaluation mode
     corrects = 0
     
-    # Iterate over data.
-    for inputs, labels, answers in dataloaders[phase]:
-        batch = inputs.shape[0]
-        inputs = inputs.view(batch*10, 3, 224, 224)
+    #iterate over data
+    for inputs, labels, set_type in dataloaders[phase]:
+        torch.cuda.empty_cache()
+        if visualize: #collect types
+            model.fc[2].add_labels(set_type)
         inputs = inputs.to(device)
-        answers = answers.to(device)
+        labels = labels.to(device)
 
-        # forward
-        # track history if only in train
+        #forward pass
+        #does not track history
         with torch.set_grad_enabled(phase == 'train'):
-            # Get model outputs and calculate loss
-            outputs = normalize(model(inputs))
-
-            preds = twohot_decode(outputs.view(batch,10))
+            #get model outputs and calculate loss
+            outputs = model(inputs)
             
+            preds = torch.argmax(outputs, dim=1)
             
-        # statistics
-        corrects += torch.sum(preds.data==answers.data)
+            if visualize: #collect answers
+                model.fc[2].add_outputs(preds)
+        
+        
+        #statistics
+        corrects += torch.sum(preds==torch.argmax(labels, dim=1))
 
     real_acc = corrects.double() / len(dataloaders[phase].dataset) * 100
     print('Acc: {:.4f}%'.format(real_acc))
 
     print()
 
-    time_elapsed = time.time() - since
+    if visualize:
+        model.fc[2].visualize()
+
+    time_elapsed = time.time() - since #track testing time
     print('Test complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
 
     return
-
-#load
-'''
-import matplotlib.pyplot as plt
-plt.plot(train_losses, label='Training loss') #train_losses.append(loss)
-plt.plot(test_losses, label='Validation loss')
-plt.legend(frameon=False)
-plt.show()
-'''
-
-
